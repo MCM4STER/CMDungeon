@@ -25,6 +25,7 @@ void getTerminalSize(int& width, int& height) {
 #include <ctime>
 #include <cmath>
 #include <limits>
+#include <stack>
 
 using namespace std;
 
@@ -71,6 +72,7 @@ struct Map {
 
 	int roomsX = 8, roomsY = 8;
 };
+
 //----------[ RANDOM FUNCTIONS ]--------------
 int randInt(int min, int max)
 {
@@ -143,6 +145,7 @@ Room generateRandomRoom(int x, int y)
 	{
 		vector<Tile> temp;
 		for (int y = 0; y < randRoom.maxSizeY; y++)
+
 		{
 			Tile tile;
 			tile.x = x;
@@ -219,12 +222,6 @@ Tile findClosestDoor(Map& map, int sX, int sY) {
 		}
 
 	return closest;
-}
-
-void connectRooms(Map& map) {
-	//Pathfinding D:
-	vector<vector<float>> tempTiles;
-
 }
 
 void generateMap(Map& map) {
@@ -310,17 +307,199 @@ void handleInput(Map& map) {
 	}
 }
 
+//----------[ PATHFINDING D: ]--------------
+
+// A*
+// https://dev.to/jansonsa/a-star-a-path-finding-c-4a4h
+
+struct Node {
+	int x, y;
+	int parentX, parentY;
+	float gCost, hCost, fCost;
+};
+
+inline bool operator < (const Node& lhs, const Node& rhs)
+{
+	return lhs.fCost < rhs.fCost;
+}
+
+bool isValid(int x, int y, Map map) {
+	if (map.map[x][y].state == WALL || map.map[x][y].state == UNDESTRUCT_WALL) return false;
+	if (x < 0 && y < 0 && x >= map.mapSizeX && y >= map.mapSizeY) return false;
+	return true;
+}
+
+double calculateH(int x, int y, Node dest) {
+	double H = (sqrt((x - dest.x) * (x - dest.x)
+		+ (y - dest.y) * (y - dest.y)));
+	return H;
+}
+
+bool isDestination(int x, int y, Node tile) {
+	return (tile.x == x && tile.y == y);
+}
+
+vector<Node> makePath(vector<vector<Node>> map, Node destination) {
+	try {
+		int x = destination.x;
+		int y = destination.y;
+		stack<Node> path;
+		vector<Node> usablePath;
+
+		while (!(map[x][y].parentX == x && map[x][y].parentY == y) && map[x][y].x != -1 && map[x][y].y != -1) {
+			path.push(map[x][y]);
+			int tempX = map[x][y].parentX;
+			int tempY = map[x][y].parentY;
+			x = tempX;
+			y = tempY;
+		}
+		path.push(map[x][y]);
+
+		while (!path.empty()) {
+			Node top = path.top();
+			path.pop();
+			usablePath.emplace_back(top);
+		}
+		return usablePath;
+	}
+	catch (const exception& e) {}
+}
+
+vector<Node> aStar(Map map, Node start, Node destination) {
+	vector<Node> empty;
+	if (!isValid(destination.x, destination.y, map)) return empty;
+	if (isDestination(start.x, start.y, destination)) return empty;
+
+	bool** closedList = new bool* [map.mapSizeX];
+	for (int i = 0; i < map.mapSizeX; i++)
+		closedList[i] = new bool[map.mapSizeY];
+
+	vector<vector<Node>> allMap;
+	for (int x = 0; x < map.mapSizeX; x++) {
+		vector<Node> temp;
+		for (int y = 0; y < map.mapSizeY; y++)
+		{
+			Node tempNode;
+			tempNode.fCost = FLT_MAX;
+			tempNode.gCost = FLT_MAX;
+			tempNode.hCost = FLT_MAX;
+			tempNode.parentX = -1;
+			tempNode.parentY = -1;
+			tempNode.x = x;
+			tempNode.y = y;
+
+			closedList[x][y] = false;
+
+			temp.push_back(tempNode);
+		}
+		allMap.push_back(temp);
+	}
+
+	int x = start.x;
+	int y = start.y;
+
+	allMap[x][y].fCost = 0.0;
+	allMap[x][y].gCost = 0.0;
+	allMap[x][y].hCost = 0.0;
+	allMap[x][y].parentX = x;
+	allMap[x][y].parentY = y;
+
+	vector<Node> openList;
+	openList.emplace_back(allMap[x][y]);
+	bool destinationFound = false;
+
+	while (!openList.empty() && openList.size() < map.mapSizeX * map.mapSizeY) {
+		Node node;
+		do {
+			float temp = FLT_MAX;
+			vector<Node>::iterator itNode;
+			for (auto i = openList.begin(); i != openList.end(); i++) {
+				Node n = *i;
+				if (n.fCost < temp) {
+					temp = n.fCost;
+					itNode = i;
+				}
+			}
+			node = *itNode;
+			openList.erase(itNode);
+		} while (!isValid(node.x, node.y, map));
+
+		x = node.x;
+		y = node.y;
+		closedList[x][y] = true;
+
+		for (int nX = -1; nX <= 1; nX++)
+			for (int nY = -1; nY <= 1; nY++)
+			{
+				double gNew, hNew, fNew;
+				if (isValid(x + nX, y + nY, map))
+					if (isDestination(x + nX, y + nY, destination)) {
+						allMap[x + nX][y + nY].parentX = x;
+						allMap[x + nX][y + nY].parentY = y;
+						destinationFound = true;
+
+						return makePath(allMap, destination);
+					}
+					else if (!closedList[x + nX][y + nY]) {
+						gNew = node.gCost + 1.0;
+						hNew = calculateH(x + nX, y + nY, destination);
+						fNew = gNew + hNew;
+
+						if (allMap[x + nX][y + nY].fCost == FLT_MAX || allMap[x + nX][y + nY].fCost > fNew) {
+							allMap[x + nX][y + nY].fCost = fNew;
+							allMap[x + nX][y + nY].gCost = gNew;
+							allMap[x + nX][y + nY].hCost = hNew;
+							allMap[x + nX][y + nY].parentX = x;
+							allMap[x + nX][y + nY].parentY = y;
+
+							openList.emplace_back(allMap[x + nX][y + nY]);
+						}
+					}
+			}
+	}
+	if (!destinationFound) return empty;
+}
+
+Node tileToNode(Tile tile) {
+	Node node;
+	node.x = tile.x;
+	node.y = tile.y;
+
+	return node;
+}
+
+Tile nodeToTile(Node node, Map& map) {
+	return map.map[node.x][node.y];
+}
+
+void connectRooms(Map& map) {
+	for (int x = 0; x < map.mapSizeX; x++)
+		for (int y = 0; y < map.mapSizeY; y++)
+			if (map.map[x][y].state == DOOR)
+				for (Node node : aStar(map, tileToNode(map.map[x][y]), tileToNode(findClosestDoor(map, x, y)))) {
+					for (int i = -1; i <= 1; i++)
+						for (int j = -1; j <= 1; j++) {
+							if (j == 0 && i == 0) continue;
+							map.map[node.x + j][node.y + i].state = CORRIDOR_WALL;
+						}
+				}
+
+}
+
+//----------[ MAIN ]--------------
+
 int main()
 {
 	Map map;
 	getTerminalSize(map.viewSizeY, map.viewSizeX);
 	map.viewSizeY /= 2;
 	generateMap(map);
-	renderMap(map);
+	connectRooms(map);
+	//renderMap(map);
 
 	while (true) {
 		handleInput(map);
-		renderMap(map);
+		//renderMap(map);
 	}
 
 	return 0;
