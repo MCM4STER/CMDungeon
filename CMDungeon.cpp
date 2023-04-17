@@ -2,29 +2,18 @@
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
 #include <Windows.h>
+#include <conio.h>
 #elif defined(__linux__)
 #include <sys/ioctl.h>
-#endif // Windows/Linux
-
-void getTerminalSize(int& width, int& height) {
-#if defined(_WIN32)
-	CONSOLE_SCREEN_BUFFER_INFO csbi;
-	GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
-	width = (int)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
-	height = (int)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
-#elif defined(__linux__)
-	struct winsize w;
-	ioctl(fileno(stdout), TIOCGWINSZ, &w);
-	width = (int)(w.ws_col);
-	height = (int)(w.ws_row);
-#endif // Windows/Linux
-}
-
+#include <termios.h>
+#include <unistd.h>
+#endif
 #include <iostream>
 #include <vector>
 #include <ctime>
 #include <cmath>
 #include <limits>
+#include <stack>
 
 using namespace std;
 
@@ -37,7 +26,7 @@ enum tileState
 	UNDESTRUCT_WALL,
 	DOOR,
 };
-enum directions
+enum Direction
 {
 	NORTH,
 	WEST,
@@ -57,7 +46,7 @@ struct Room
 	int mapX{}, mapY{};
 	int offsetX{}, offsetY{};
 	vector<vector<Tile>> tiles;
-	vector<directions> doors;
+	vector<Direction> doors;
 
 	int maxSizeX = 12, maxSizeY = 24;
 };
@@ -69,18 +58,33 @@ struct Map {
 	vector<vector<Room>> rooms;
 	vector<vector<Tile>> map;
 
-	int roomsX = 8, roomsY = 8;
+	int roomsX = 7, roomsY = 7;
 };
+
 //----------[ RANDOM FUNCTIONS ]--------------
+void getTerminalSize(int& width, int& height) {
+#if defined(_WIN32)
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+	width = (int)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+	height = (int)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+#elif defined(__linux__)
+	struct winsize w;
+	ioctl(fileno(stdout), TIOCGWINSZ, &w);
+	width = (int)(w.ws_col);
+	height = (int)(w.ws_row);
+#endif // Windows/Linux
+}
+
 int randInt(int min, int max)
 {
 	return (int)(rand() % (max - min)) + min;
 }
 
-directions randDirection(unsigned int seed)
+Direction randDirection(unsigned int seed)
 {
 	srand(seed);
-	const directions allDir[4] = { NORTH, WEST, EAST, SOUTH };
+	const Direction allDir[4] = { NORTH, WEST, EAST, SOUTH };
 	return allDir[randInt(0, 4)];
 }
 
@@ -99,6 +103,7 @@ char stateToChar(tileState s)
 	switch (s)
 	{
 	case WALL:
+	case AIR:
 	case CORRIDOR_WALL:
 		return '#';
 	case UNDESTRUCT_WALL:
@@ -121,9 +126,12 @@ bool isWalkthru(tileState state) {
 	return false;
 }
 
-//----------[ MAP FUNCTIONS ]-----------------
-void placeEggs(int rX, int rY) {}
+Room* getRoomFromMapCoords(Map& map, int x, int y) {
+	Room r;
+	return &map.rooms[(int)x / r.maxSizeX][(int)x / r.maxSizeY];
+}
 
+//----------[ MAP FUNCTIONS ]-----------------
 Room generateRandomRoom(int x, int y)
 {
 	unsigned int roomSeed = getSeed(x, y);
@@ -143,6 +151,7 @@ Room generateRandomRoom(int x, int y)
 	{
 		vector<Tile> temp;
 		for (int y = 0; y < randRoom.maxSizeY; y++)
+
 		{
 			Tile tile;
 			tile.x = x;
@@ -165,7 +174,7 @@ Room generateRandomRoom(int x, int y)
 
 	for (int i = 0; i < roomSeed % 3 + 2; i++)
 	{
-		directions randDir = randDirection(roomSeed + i);
+		Direction randDir = randDirection(roomSeed + i);
 		randRoom.doors.push_back(randDir);
 		if (randDir == NORTH)
 			randRoom.tiles[randRoom.offsetX][randInt(1 + randRoom.offsetY, randRoom.sizeY + randRoom.offsetY - 2)].state = DOOR;
@@ -211,7 +220,8 @@ Tile findClosestDoor(Map& map, int sX, int sY) {
 
 	for (int x = 0; x < map.mapSizeX; x++)
 		for (int y = 0; y < map.mapSizeY; y++) {
-			if (map.map[x][y].state != DOOR) continue;
+			if (getRoomFromMapCoords(map, x, y) == getRoomFromMapCoords(map, sX, sY)) continue;
+			if (map.map[x][y].state != DOOR || (x == sX && y == sY)) continue;
 			if (closestDist > getDistance(sX, sY, x, y)) {
 				closestDist = getDistance(sX, sY, x, y);
 				closest = map.map[x][y];
@@ -221,13 +231,8 @@ Tile findClosestDoor(Map& map, int sX, int sY) {
 	return closest;
 }
 
-void connectRooms(Map& map) {
-	//Pathfinding D:
-	vector<vector<float>> tempTiles;
-
-}
-
 void generateMap(Map& map) {
+	cout << "Generating map..." << endl;
 	Room r;
 	map.mapSizeX = map.roomsX * r.maxSizeX;
 	map.mapSizeY = map.roomsY * r.maxSizeY;
@@ -243,6 +248,7 @@ void generateMap(Map& map) {
 		map.map.push_back(temp);
 	}
 
+	cout << "Creating rooms..." << endl;
 	for (int x = 0; x < map.roomsX; x++) {
 		vector<Room> temp;
 		for (int y = 0; y < map.roomsY; y++) {
@@ -266,7 +272,7 @@ void generateMap(Map& map) {
 	map.playerY = centerRoom.mapY * r.maxSizeY + centerRoom.sizeY / 2;
 }
 
-void movePlayer(Map& map, directions dir) {
+void movePlayer(Map& map, Direction dir) {
 	int newX = map.playerX, newY = map.playerY;
 	switch (dir)
 	{
@@ -290,10 +296,223 @@ void movePlayer(Map& map, directions dir) {
 	}
 }
 
-void handleInput(Map& map) {
-	char action;
-	cin >> action;
-	switch (action)
+//----------[ PATHFINDING D: ]--------------
+
+// A*
+// https://dev.to/jansonsa/a-star-a-path-finding-c-4a4h
+
+struct Node {
+	int x, y;
+	int parentX, parentY;
+	float gCost, hCost, fCost;
+};
+
+inline bool operator < (const Node& lhs, const Node& rhs)
+{
+	return lhs.fCost < rhs.fCost;
+}
+
+bool isValid(int x, int y, Map map) {
+	if (x < 0 && y < 0 && x >= map.mapSizeX && y >= map.mapSizeY) return false;
+	if (map.map[x][y].state == AIR || map.map[x][y].state == DOOR) return true;
+	return false;
+}
+
+double calculateH(int x, int y, Node dest) {
+	double H = (sqrt((x - dest.x) * (x - dest.x)
+		+ (y - dest.y) * (y - dest.y)));
+	return H;
+}
+
+bool isDestination(int x, int y, Node tile) {
+	return (tile.x == x && tile.y == y);
+}
+
+vector<Node> makePath(vector<vector<Node>> map, Node destination, Map m) {
+	try {
+		int x = destination.x;
+		int y = destination.y;
+		stack<Node> path;
+		vector<Node> usablePath;
+
+		const int dx[] = { 0, -1, 0, 1 };
+		const int dy[] = { -1, 0, 1, 0 };
+
+		while (!(map[x][y].parentX == x && map[x][y].parentY == y) && map[x][y].x != -1 && map[x][y].y != -1) {
+			path.push(map[x][y]);
+			int tempX = map[x][y].parentX;
+			int tempY = map[x][y].parentY;
+			x = tempX;
+			y = tempY;
+		}
+		path.push(map[x][y]);
+
+		while (!path.empty()) {
+			Node top = path.top();
+			path.pop();
+			usablePath.emplace_back(top);
+			for (int i = 0; i < 4; i++) {
+				int newX = top.x + dx[i];
+				int newY = top.y + dy[i];
+				if (newX >= 0 && newX < m.mapSizeX && newY >= 0 && newY < m.mapSizeY &&
+					(map[newX][newY].parentX == top.x && map[newX][newY].parentY == top.y) &&
+					!(dx[i] != 0 && dy[i] != 0)) {
+					x = newX;
+					y = newY;
+					path.push(map[x][y]);
+					break;
+				}
+			}
+		}
+		return usablePath;
+	}
+	catch (const exception& e) {}
+}
+
+vector<Node> aStar(Map map, Node start, Node destination) {
+	vector<Node> empty;
+	if (!isValid(destination.x, destination.y, map)) return empty;
+	if (isDestination(start.x, start.y, destination)) return empty;
+
+	bool** closedList = new bool* [map.mapSizeX];
+	for (int i = 0; i < map.mapSizeX; i++)
+		closedList[i] = new bool[map.mapSizeY];
+
+	vector<vector<Node>> allMap;
+	for (int x = 0; x < map.mapSizeX; x++) {
+		vector<Node> temp;
+		for (int y = 0; y < map.mapSizeY; y++)
+		{
+			Node tempNode;
+			tempNode.fCost = FLT_MAX;
+			tempNode.gCost = FLT_MAX;
+			tempNode.hCost = FLT_MAX;
+			tempNode.parentX = -1;
+			tempNode.parentY = -1;
+			tempNode.x = x;
+			tempNode.y = y;
+
+			closedList[x][y] = false;
+
+			temp.push_back(tempNode);
+		}
+		allMap.push_back(temp);
+	}
+
+	int x = start.x;
+	int y = start.y;
+
+	allMap[x][y].fCost = 0.0;
+	allMap[x][y].gCost = 0.0;
+	allMap[x][y].hCost = 0.0;
+	allMap[x][y].parentX = x;
+	allMap[x][y].parentY = y;
+
+	vector<Node> openList;
+	openList.emplace_back(allMap[x][y]);
+	bool destinationFound = false;
+
+	while (!openList.empty() && openList.size() < map.mapSizeX * map.mapSizeY) {
+		Node node;
+		do {
+			float temp = FLT_MAX;
+			vector<Node>::iterator itNode;
+			for (auto i = openList.begin(); i != openList.end(); i++) {
+				Node n = *i;
+				if (n.fCost < temp) {
+					temp = n.fCost;
+					itNode = i;
+				}
+			}
+			node = *itNode;
+			openList.erase(itNode);
+		} while (!isValid(node.x, node.y, map));
+
+		x = node.x;
+		y = node.y;
+		closedList[x][y] = true;
+
+		for (int nX = -1; nX <= 1; nX++)
+			for (int nY = -1; nY <= 1; nY++)
+			{
+				double gNew, hNew, fNew;
+				if (isValid(x + nX, y + nY, map))
+					if (isDestination(x + nX, y + nY, destination)) {
+						allMap[x + nX][y + nY].parentX = x;
+						allMap[x + nX][y + nY].parentY = y;
+						destinationFound = true;
+
+						return makePath(allMap, destination, map);
+					}
+					else if (!closedList[x + nX][y + nY]) {
+						gNew = node.gCost + 1.0;
+						hNew = calculateH(x + nX, y + nY, destination);
+						fNew = gNew + hNew;
+
+						if (allMap[x + nX][y + nY].fCost == FLT_MAX || allMap[x + nX][y + nY].fCost > fNew) {
+							allMap[x + nX][y + nY].fCost = fNew;
+							allMap[x + nX][y + nY].gCost = gNew;
+							allMap[x + nX][y + nY].hCost = hNew;
+							allMap[x + nX][y + nY].parentX = x;
+							allMap[x + nX][y + nY].parentY = y;
+
+							openList.emplace_back(allMap[x + nX][y + nY]);
+						}
+					}
+			}
+	}
+	if (!destinationFound) return empty;
+}
+
+Node tileToNode(Tile tile) {
+	Node node;
+	node.x = tile.x;
+	node.y = tile.y;
+
+	return node;
+}
+
+Tile nodeToTile(Node node, Map& map) {
+	return map.map[node.x][node.y];
+}
+
+void connectRooms(Map& map) {
+	vector<vector<Node>> allPaths;
+
+	cout << "Connecting rooms..."<<endl;
+	for (int x = 0; x < map.mapSizeX; x++) {
+		for (int y = 0; y < map.mapSizeY; y++) {
+			if (map.map[x][y].state == DOOR) {
+				Node closestDoor = tileToNode(findClosestDoor(map, x, y));
+				vector<Node> path = aStar(map, tileToNode(map.map[x][y]), closestDoor);
+				allPaths.push_back(path);
+			}
+		}
+	}
+
+	cout << "Generating paths..." << endl;
+	for (const vector<Node>& path : allPaths) {
+		for (const Node& node : path) {
+			for (int i = -1; i <= 1; i++) {
+				for (int j = -1; j <= 1; j++) {
+					if (j == 0 && i == 0) {
+						map.map[node.x + j][node.y + i].state = ROOM_AIR;
+						continue;
+					}
+					if (map.map[node.x + j][node.y + i].state != AIR) continue;
+					map.map[node.x + j][node.y + i].state = CORRIDOR_WALL;
+				}
+			}
+		}
+	}
+
+	cout << "end" << endl;
+}
+
+//----------[ MAIN ]--------------
+
+void handleInput(Map& map, char key) {
+	switch (key)
 	{
 	case 'w':
 		movePlayer(map, NORTH);
@@ -310,18 +529,43 @@ void handleInput(Map& map) {
 	}
 }
 
+void mainLoop(Map& map) {
+	char key{};
+#if defined(_WIN32)
+	while (true) {
+		if (_kbhit()) {
+			key = _getch();
+			handleInput(map, key);
+			renderMap(map);
+		}
+	}
+#elif defined(__linux__)
+	struct termios old_termios, new_termios;
+	tcgetattr(STDIN_FILENO, &old_termios);
+	new_termios = old_termios;
+	new_termios.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+	while (true) {
+		if (read(STDIN_FILENO, &key, 1) > 0) {
+			handleInput(map, key);
+			renderMap(map);
+		}
+	}
+	tcsetattr(STDIN_FILENO, TCSANOW, &old_termios);
+#endif // Windows/Linux 
+}
+
+
 int main()
 {
 	Map map;
 	getTerminalSize(map.viewSizeY, map.viewSizeX);
 	map.viewSizeY /= 2;
+	map.viewSizeX--;
 	generateMap(map);
+	connectRooms(map);
 	renderMap(map);
-
-	while (true) {
-		handleInput(map);
-		renderMap(map);
-	}
+	mainLoop(map);
 
 	return 0;
 }
