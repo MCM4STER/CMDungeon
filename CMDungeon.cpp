@@ -303,8 +303,8 @@ void movePlayer(Map& map, Direction dir) {
 
 struct Node {
 	int x, y;
-	int parentX, parentY;
-	float gCost, hCost, fCost;
+	int parentX = -1, parentY = -1;
+	float gCost = FLT_MAX, hCost = FLT_MAX, fCost = FLT_MAX;
 };
 
 inline bool operator < (const Node& lhs, const Node& rhs)
@@ -384,11 +384,6 @@ vector<Node> aStar(Map map, Node start, Node destination) {
 		for (int y = 0; y < map.mapSizeY; y++)
 		{
 			Node tempNode;
-			tempNode.fCost = FLT_MAX;
-			tempNode.gCost = FLT_MAX;
-			tempNode.hCost = FLT_MAX;
-			tempNode.parentX = -1;
-			tempNode.parentY = -1;
 			tempNode.x = x;
 			tempNode.y = y;
 
@@ -479,14 +474,13 @@ Tile nodeToTile(Node node, Map& map) {
 void connectRooms(Map& map) {
 	vector<vector<Node>> allPaths;
 
-	cout << "Connecting rooms..."<<endl;
+	cout << "Connecting rooms..." << endl;
 	for (int x = 0; x < map.mapSizeX; x++) {
 		for (int y = 0; y < map.mapSizeY; y++) {
-			if (map.map[x][y].state == DOOR) {
-				Node closestDoor = tileToNode(findClosestDoor(map, x, y));
-				vector<Node> path = aStar(map, tileToNode(map.map[x][y]), closestDoor);
-				allPaths.push_back(path);
-			}
+			if (map.map[x][y].state != DOOR) continue;
+			Node closestDoor = tileToNode(findClosestDoor(map, x, y));
+			vector<Node> path = aStar(map, tileToNode(map.map[x][y]), closestDoor);
+			allPaths.push_back(path);
 		}
 	}
 
