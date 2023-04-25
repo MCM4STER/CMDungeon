@@ -175,7 +175,7 @@ char stateToChar(Tile s)
 void viewMap2D(view& v, Map& map)
 {
 	Room r;
-	int mapPlayerX = (int)(map.player.y / map.tileSize);
+	int mapPlayerX = (int)(map.player.x / map.tileSize);
 	int mapPlayerY = (int)(map.player.y / map.tileSize);
 
 	int view0X = mapPlayerX - v.sizeX / 2;
@@ -314,6 +314,12 @@ void normalizeTiles(Map& map) {
 Room* getRoomFromMapCoords(Map& map, int x, int y) {
 	Room r;
 	return &map.roomArray[(int)y / r.maxSizeY][(int)x / r.maxSizeX];
+}
+
+Tile getTileFromPlayerCoords(Map& map, int x, int y) {
+	int mapPlayerX = (int)(x / map.tileSize);
+	int mapPlayerY = (int)(y / map.tileSize);
+	return map.tileArray[mapPlayerY][mapPlayerX];
 }
 
 // ----------[ PATHFINDING ]--------------
@@ -547,25 +553,25 @@ void castRays(view& v, Map map) {
 	int r{}, mx{}, my{}, dof{};
 	float rx{}, ry{}, ra{}, xo{}, yo{}, disT{};
 
-	ra = map.player.angle - DEG * v.sizeX/2;
+	ra = map.player.angle - DEG * v.sizeX / 2;
 	if (ra < 0) ra += 2 * PI;
 	if (ra > 2 * PI) ra -= 2 * PI;
 	for (int r = 0; r < v.sizeX; r++)
 	{
 		// HORIZONTAL
 		dof = 0;
-		float disH = FLT_MAX, hx = map.player.x, hy = map.player.y;
+		float disH = INT_MAX, hx = map.player.x, hy = map.player.y;
 
 		float aTan = -1 / tan(ra);
-		if (ra > PI) {
-			ry = (((int)map.player.y >> 6) << 6) - 0.0001;
-			rx = (map.player.y - ry) * aTan + map.player.x;
-			yo = -64; xo = -yo * aTan;
-		}
 		if (ra < PI) {
 			ry = (((int)map.player.y >> 6) << 6) + 64;
 			rx = (map.player.y - ry) * aTan + map.player.x;
 			yo = 64; xo = -yo * aTan;
+		}
+		if (ra > PI) {
+			ry = (((int)map.player.y >> 6) << 6) - 0.0001;
+			rx = (map.player.y - ry) * aTan + map.player.x;
+			yo = -64; xo = -yo * aTan;
 		}
 		if (ra == 0 || ra == PI) {
 			rx = map.player.x; ry = map.player.y; dof = 16;
@@ -585,18 +591,18 @@ void castRays(view& v, Map map) {
 
 		// VERTICAL
 		dof = 0;
-		float disV = FLT_MAX, vx = map.player.x, vy = map.player.y;
+		float disV = INT_MAX, vx = map.player.x, vy = map.player.y;
 
 		float nTan = -tan(ra);
-		if (ra > P2 && ra < P3) {
-			rx = (((int)map.player.x >> 6) << 6) - 0.0001;
-			ry = (map.player.x - rx) * nTan + map.player.y;
-			xo = -64; yo = -xo * nTan;
-		}
 		if (ra < P2 || ra > P3) {
 			rx = (((int)map.player.x >> 6) << 6) + 64;
 			ry = (map.player.x - rx) * nTan + map.player.y;
 			xo = 64; yo = -xo * nTan;
+		}
+		if (ra > P2 && ra < P3) {
+			rx = (((int)map.player.x >> 6) << 6) - 0.0001;
+			ry = (map.player.x - rx) * nTan + map.player.y;
+			xo = -64; yo = -xo * nTan;
 		}
 		if (ra == 0 || ra == PI) {
 			rx = map.player.x; ry = map.player.y; dof = 16;
@@ -635,7 +641,6 @@ void castRays(view& v, Map map) {
 	}
 }
 
-
 // ----------[ MAIN ]--------------
 
 void handleInput(char key, Map& map, view& v) {
@@ -654,10 +659,16 @@ void handleInput(char key, Map& map, view& v) {
 		map.player.deltaY = sin(map.player.angle) * 5;
 		break;
 	case 'w':
-		map.player.x += map.player.deltaX; map.player.y += map.player.deltaY;
+		if (getTileFromPlayerCoords(map, map.player.x + map.player.deltaX, map.player.y) != WALL)
+			map.player.x += map.player.deltaX;
+		if (getTileFromPlayerCoords(map, map.player.x, map.player.y + map.player.deltaY) != WALL)
+			map.player.y += map.player.deltaY;
 		break;
 	case 's':
-		map.player.x -= map.player.deltaX; map.player.y -= map.player.deltaY;
+		if (getTileFromPlayerCoords(map, map.player.x - map.player.deltaX, map.player.y) != WALL)
+			map.player.x -= map.player.deltaX;
+		if (getTileFromPlayerCoords(map, map.player.x, map.player.y - map.player.deltaY) != WALL)
+			map.player.y -= map.player.deltaY;
 		break;
 	case 'e':
 		v.map = !v.map;
